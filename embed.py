@@ -118,6 +118,7 @@ def get_qdrant_client():
             api_key=os.getenv(
                 "QDRANT_API_KEY"
             ),
+            timeout= 60
         )
 
         print(
