@@ -192,19 +192,17 @@ def collection_stats(collection_name: str, db: Session = Depends(get_db)):
         .count()
     )
 
-    # 2. Extract Document count from metadata.json
-    metadata_file = Path("user_uploads") / collection.name / "metadata.json"
+    # 2. BULLETPROOF DOCUMENT COUNT: Physically check the PDFs on the hard drive
     document_count = 0
+    document_list = []
+    pdf_dir = Path(collection.chunk_dir)
     
-    if metadata_file.exists():
-        try:
-            with open(metadata_file, "r", encoding="utf-8") as f:
-                meta = json.load(f)
-                document_count = meta.get("document_count", 0)
-        except Exception as e:
-            print(f"Error reading metadata: {e}")
+    if pdf_dir.exists():
+        pdfs = list(pdf_dir.glob("*.pdf"))
+        document_count = len(pdfs)
+        document_list = [pdf.name for pdf in pdfs]
 
-    # 3. Return ALL stats (including documents)
+    # 3. Return ALL stats (including documents list)
     return {
         "collection": collection.name,
         "description": collection.description,
@@ -212,7 +210,8 @@ def collection_stats(collection_name: str, db: Session = Depends(get_db)):
         "created_at": collection.created_at,
         "sessions": session_count,
         "messages": message_count,
-        "documents": document_count, # <--- This is what was missing!
+        "documents": document_count,
+        "document_list": document_list, # <--- Sending the list to the frontend!
     }
 
 @app.delete("/collections/{collection_name}")

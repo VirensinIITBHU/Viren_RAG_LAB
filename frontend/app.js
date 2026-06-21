@@ -81,6 +81,35 @@ function attachEvents() {
     closeCollectionBtn.addEventListener("click", () => {
         collectionModal.classList.add("hidden");
     });
+    // Toggle Document List Accordion
+    // Toggle Document List Accordion
+    const docsToggle = document.getElementById("docs-metric-toggle");
+    const docsListContainer = document.getElementById("docs-list-container");
+    
+    if (docsToggle && docsListContainer) {
+        // Find the little arrow span to animate it
+        const arrow = docsToggle.querySelector("span span"); 
+        if (arrow) {
+            arrow.style.display = "inline-block";
+            arrow.style.transition = "transform 0.2s ease";
+            // Start collapsed (pointing right)
+            arrow.style.transform = "rotate(-90deg)"; 
+        }
+
+        docsToggle.addEventListener("click", () => {
+            // Toggle the visibility
+            docsListContainer.classList.toggle("hidden");
+            
+            // Rotate the arrow based on state
+            if (arrow) {
+                if (docsListContainer.classList.contains("hidden")) {
+                    arrow.style.transform = "rotate(-90deg)"; // Point Right
+                } else {
+                    arrow.style.transform = "rotate(0deg)";   // Point Down
+                }
+            }
+        });
+    }
 
     // Close session dropdowns when clicking anywhere else
     document.addEventListener("click", () => {
@@ -122,6 +151,23 @@ async function loadCollectionStats(collectionName) {
         statDocuments.textContent = data.documents ?? 0;
         statSessions.textContent = data.sessions ?? 0;
         statMessages.textContent = data.messages ?? 0;
+
+        // NEW: Populate the expandable document list
+        const docsListContainer = document.getElementById("docs-list-container");
+        if (docsListContainer) {
+            docsListContainer.innerHTML = ""; // Clear old list
+            
+            if (data.document_list && data.document_list.length > 0) {
+                data.document_list.forEach(docName => {
+                    const docDiv = document.createElement("div");
+                    docDiv.className = "doc-list-item";
+                    docDiv.textContent = docName;
+                    docsListContainer.appendChild(docDiv);
+                });
+            } else {
+                docsListContainer.innerHTML = "<div class='doc-list-item' style='opacity: 0.5;'>No documents uploaded</div>";
+            }
+        }
     } catch (error) {
         console.error("STATS ERROR:", error);
     }
@@ -598,7 +644,7 @@ function renderSources(sources) {
     sources.forEach((source) => {
         // Fallbacks in case your backend uses slightly different keys
         const paper = source.paper_name || source.filename || "Unknown Document";
-        const page = source.page || source.page_number || "-";
+        const page = source.page ?? source.page_number ?? "-";
         const score = source.score ?? 0;
         
         // Ensure your backend generate.py returns the actual text chunk as "content" or "text"

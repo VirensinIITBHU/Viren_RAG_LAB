@@ -208,7 +208,17 @@ def build_context(
 
         source_id = f"SOURCE_{idx}"
         paper_name = payload.get("paper_name", "Unknown")
-        page = payload.get("page", "?")
+        paper_name = payload.get("paper_name", "Unknown")
+        raw_page = payload.get("page")
+        if raw_page is None:
+            raw_page = payload.get("page_number", "?")
+            
+        # Add 1 to fix zero-indexing, and convert to string!
+        if isinstance(raw_page, int):
+            page = str(raw_page + 1)
+        else:
+            page = str(raw_page)
+            
         text = payload.get("text", "")
 
         block = f"""

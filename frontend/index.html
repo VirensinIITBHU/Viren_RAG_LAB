@@ -161,53 +161,30 @@
         <!-- COLLECTION STATS -->
 
         <div class="panel-card">
-
-            <h3>
-                Collection Stats
-            </h3>
-
+            <h3>Collection Stats</h3>
             <div id="collection-stats">
 
-                <div class="metric">
-
-                    <span>
-                        Documents
+                <div class="metric expandable" id="docs-metric-toggle">
+                    <span style="display: flex; align-items: center; gap: 6px;">
+                        Documents <span style="font-size: 0.6rem; color: var(--muted);">▼</span>
                     </span>
-
-                    <span id="stat-documents">
-                        0
-                    </span>
-
+                    <span id="stat-documents">0</span>
                 </div>
+                
+                <div id="docs-list-container" class="hidden"></div>
 
                 <div class="metric">
-
-                    <span>
-                        Sessions
-                    </span>
-
-                    <span id="stat-sessions">
-                        0
-                    </span>
-
+                    <span>Sessions</span>
+                    <span id="stat-sessions">0</span>
                 </div>
-
+                
                 <div class="metric">
-
-                    <span>
-                        Messages
-                    </span>
-
-                    <span id="stat-messages">
-                        0
-                    </span>
-
+                    <span>Messages</span>
+                    <span id="stat-messages">0</span>
                 </div>
 
             </div>
-
         </div>
-
         <!-- RETRIEVAL SETTINGS -->
 
         <div class="panel-card">

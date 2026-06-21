@@ -992,3 +992,51 @@ button {
     color: var(--accent);
     font-family: monospace;
 }
+
+/* ================================================= */
+/* EXPANDABLE DOCUMENTS LIST */
+/* ================================================= */
+
+.expandable {
+    cursor: pointer;
+    transition: background 0.2s ease;
+    padding: 10px 8px !important; 
+    margin: 0 -8px; 
+    border-radius: 8px;
+    user-select: none;
+}
+
+.expandable:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+#docs-list-container.hidden {
+    display: none !important;
+}
+
+#docs-list-container {
+    
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-left: 2px solid var(--border);
+}
+
+.doc-list-item {
+    font-size: 0.75rem;
+    color: var(--muted);
+    word-break: break-all;
+    display: flex;
+    align-items: flex-start;
+    line-height: 1.4;
+}
+
+.doc-list-item::before {
+    content: "📄";
+    margin-right: 8px;
+    font-size: 0.75rem;
+    opacity: 0.7;
+}
