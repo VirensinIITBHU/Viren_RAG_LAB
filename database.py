@@ -5,6 +5,7 @@ Persistence Layer
 """
 
 from datetime import datetime
+import json
 from sqlalchemy.orm import joinedload, Session
 from sqlalchemy import (
     create_engine,
@@ -103,7 +104,7 @@ class Message(Base):
     role = Column(String, nullable=False)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
-
+    sources = Column(Text, nullable=True) # <--- NEW COLUMN
     session = relationship("ChatSession", back_populates="messages")
 
 # --------------------------------------------------
@@ -187,11 +188,12 @@ def update_session_title(db: Session, session_id: int, title: str):
 # MESSAGE HELPERS
 # --------------------------------------------------
 
-def add_message(db: Session, session_id: int, role: str, content: str):
+def add_message(db: Session, session_id: int, role: str, content: str,sources: str = None):
     message = Message(
         session_id=session_id,
         role=role,
         content=content,
+        sources=sources
     )
     db.add(message)
 
@@ -214,6 +216,7 @@ def build_chat_history(db: Session, session_id: int):
         history.append({
             "role": msg.role,
             "content": msg.content,
+            "sources": json.loads(msg.sources) if msg.sources else []
         })
     return history
 

@@ -357,12 +357,14 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
         raise
 
     answer = response["answer"]
+    sources_data = response.get("sources", []) # Get the sources
 
     add_message(
         db=db,
         session_id=request.session_id,
         role="assistant",
         content=answer,
+        sources=json.dumps(sources_data) # <--- Convert to string and save!
     )
 
     return {

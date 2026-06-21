@@ -10,6 +10,7 @@ const API_BASE = "http://127.0.0.1:8000";
 
 let currentCollection = null;
 let currentSessionId = null;
+let currentChatMessages = []; // Tracks messages and their specific sources
 
 // ==================================================
 // DOM
@@ -47,6 +48,27 @@ document.addEventListener("DOMContentLoaded", async () => {
     await loadCollections();
 });
 
+
+// Globally accessible function so the inline HTML can trigger it
+window.loadAndHighlightSource = function(msgIndex, sourceIndex) {
+    const msg = currentChatMessages[msgIndex];
+    if (msg && msg.sources) {
+        // 1. Force the Right Panel to display the historical sources for this specific message
+        renderSources(msg.sources);
+        
+        // 2. Wait 100ms for the DOM to finish re-rendering the cards, then highlight!
+        setTimeout(() => {
+            const card = document.getElementById(`source-card-${sourceIndex}`);
+            if (card) {
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                card.classList.add("highlighted");
+                // Remove highlight after 2 seconds
+                setTimeout(() => card.classList.remove("highlighted"), 2000);
+            }
+        }, 100);
+    }
+};
+
 // ==================================================
 // EVENTS
 // ==================================================
@@ -81,7 +103,7 @@ function attachEvents() {
     closeCollectionBtn.addEventListener("click", () => {
         collectionModal.classList.add("hidden");
     });
-    // Toggle Document List Accordion
+    
     // Toggle Document List Accordion
     const docsToggle = document.getElementById("docs-metric-toggle");
     const docsListContainer = document.getElementById("docs-list-container");
@@ -541,10 +563,20 @@ async function loadHistory(sessionId) {
         const data = await response.json();
 
         chatMessages.innerHTML = "";
+        currentChatMessages = []; // Reset memory for the new chat!
 
-        data.messages.forEach((message) => {
-            appendMessage(message.role, message.content);
+        data.messages.forEach((message, index) => {
+            currentChatMessages.push(message);
+            // We MUST pass the index here so historical citations get their IDs!
+            appendMessage(message.role, message.content, index);
         });
+
+        // Optional UX Polish: Load the sources of the very last message into the right panel automatically
+        const lastMsg = currentChatMessages[currentChatMessages.length - 1];
+        if (lastMsg && lastMsg.role === "assistant" && lastMsg.sources) {
+            renderSources(lastMsg.sources);
+        }
+
     } catch (error) {
         console.error("HISTORY ERROR:", error);
     }
@@ -564,9 +596,12 @@ async function sendMessage() {
         return;
     }
 
-    appendMessage("user", query);
+    // --- FIX 1: Track the User Message Index ---
+    const userIndex = currentChatMessages.length;
+    currentChatMessages.push({ role: "user", content: query });
+    appendMessage("user", query, userIndex);
+    
     chatInput.value = "";
-
     const loading = appendMessage("assistant", "Thinking...");
 
     try {
@@ -592,10 +627,23 @@ async function sendMessage() {
         }
 
         const data = await response.json();
-
         loading.remove();
-        appendMessage("assistant", data.answer || "No response.");
-        renderSources(data.sources || []);
+
+        // --- FIX 2: Track the Assistant Message Index and Sources ---
+        const assistantIndex = currentChatMessages.length;
+        const sourcesData = data.sources || [];
+        
+        // Save it to memory so historical clicks work
+        currentChatMessages.push({ 
+            role: "assistant", 
+            content: data.answer, 
+            sources: sourcesData 
+        });
+
+        // Pass the index into appendMessage so the buttons know their ID
+        appendMessage("assistant", data.answer || "No response.", assistantIndex);
+        
+        renderSources(sourcesData);
         renderMetrics(data.retrieval_metrics || {});
 
         setTimeout(async () => {
@@ -614,18 +662,34 @@ async function sendMessage() {
 // MESSAGES
 // ==================================================
 
-function appendMessage(role, content) {
+// Add msgIndex as a parameter
+function appendMessage(role, content, msgIndex = null) {
     const wrapper = document.createElement("div");
     wrapper.className = `message ${role}`;
-
     const body = document.createElement("div");
     body.className = "message-content";
-    body.textContent = content;
 
+    if (role === "assistant") {
+        let safeContent = content.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        
+        // Pass the specific msgIndex into the click handler!
+        // Inside appendMessage, update the SOURCE_X regex replace:
+        safeContent = safeContent.replace(/SOURCE_(\d+)/g, (match, p1) => {
+            const sourceIdx = parseInt(p1) - 1; // 0-based index
+            // Note: We need a way to look up the content. 
+            // This assumes the assistant message object has a 'sources' property.
+            return `<span class="source-ref" onclick="loadAndHighlightSource(${msgIndex}, ${p1})">
+                        ${p1}
+                        <div class="source-preview-popup">Loading preview...</div>
+                    </span>`;
+        });
+        body.innerHTML = safeContent;
+    } else {
+        body.textContent = content; 
+    }
     wrapper.appendChild(body);
     chatMessages.appendChild(wrapper);
     chatMessages.scrollTop = chatMessages.scrollHeight;
-
     return wrapper;
 }
 
@@ -641,17 +705,18 @@ function renderSources(sources) {
         return;
     }
 
-    sources.forEach((source) => {
-        // Fallbacks in case your backend uses slightly different keys
+    // Inside renderSources, look for the card creation loop:
+    sources.forEach((source, index) => { // <-- Ensure 'index' is in the parameter list
         const paper = source.paper_name || source.filename || "Unknown Document";
         const page = source.page ?? source.page_number ?? "-";
         const score = source.score ?? 0;
-        
-        // Ensure your backend generate.py returns the actual text chunk as "content" or "text"
         const previewText = source.content || source.text || "No text preview available.";
 
         const card = document.createElement("div");
         card.className = "source-card";
+        
+        // ADD THIS LINE: Give it a unique ID based on its numerical order
+        card.id = `source-card-${index + 1}`; 
 
         card.innerHTML = `
             <div class="source-header">

@@ -882,6 +882,34 @@ button {
 /* ================================================= */
 /* ADVANCED SOURCES PANEL */
 /* ================================================= */
+/* Tooltip container */
+.source-ref {
+    position: relative;
+    /* ... rest of your existing styling ... */
+}
+
+/* The popup box */
+.source-preview-popup {
+    position: absolute;
+    bottom: 120%;
+    left: 0;
+    width: 300px;
+    background: var(--card);
+    border: 1px solid var(--accent);
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    color: var(--text);
+    z-index: 999;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+    display: none; /* Hidden by default */
+    pointer-events: none;
+    line-height: 1.4;
+}
+
+.source-ref:hover .source-preview-popup {
+    display: block; /* Show on hover */
+}
 
 .source-card {
     background: var(--sidebar);
@@ -1039,4 +1067,41 @@ button {
     margin-right: 8px;
     font-size: 0.75rem;
     opacity: 0.7;
+}
+
+
+/* ================================================= */
+/* INLINE CITATIONS */
+/* ================================================= */
+
+.source-ref {
+    display: inline-block;
+    background: rgba(249, 115, 22, 0.15);
+    color: var(--accent);
+    border: 1px solid rgba(249, 115, 22, 0.3);
+    border-radius: 4px;
+    padding: 0 6px;
+    margin: 0 2px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    vertical-align: middle;
+}
+
+.source-ref:hover {
+    background: var(--accent);
+    color: white;
+}
+
+/* Highlight Animation for the Right Panel */
+@keyframes highlightPulse {
+    0% { border-color: var(--border); box-shadow: none; }
+    30% { border-color: var(--accent); box-shadow: 0 0 20px rgba(249,115,22,0.3); transform: scale(1.02); }
+    100% { border-color: var(--border); box-shadow: none; }
+}
+
+.source-card.highlighted {
+    animation: highlightPulse 1.5s ease;
+    border-color: var(--accent);
 }
