@@ -27,5 +27,6 @@ mini_ragas_v2_results.csv
 # Local databases
 *.db
 *.sqlite
+firstrag.db
 
 
