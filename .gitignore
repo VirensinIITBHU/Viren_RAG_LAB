@@ -1,0 +1,31 @@
+# Virtual env
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Evaluation outputs
+test.py
+test1.py
+mini_ragas_v2_results.csv
+
+
+# Local databases
+*.db
+*.sqlite
+
+

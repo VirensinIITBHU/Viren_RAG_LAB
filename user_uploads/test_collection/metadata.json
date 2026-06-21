@@ -1,0 +1,9 @@
+{
+    "collection_name": "test_collection",
+    "created_at": "2026-06-21T07:06:58.532906",
+    "documents": [
+        "SOP-Virendra.pdf"
+    ],
+    "document_count": 1,
+    "vector_count": 104
+}

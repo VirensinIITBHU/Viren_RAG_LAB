@@ -1,0 +1,415 @@
+
+<title>Viren RAG LAB</title>
+
+<meta charset="UTF-8">
+
+<link rel="stylesheet" href="style.css">
+
+<link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+    rel="stylesheet">
+
+
+
+<div class="app-container">
+
+    <!-- ================================= -->
+    <!-- SIDEBAR -->
+    <!-- ================================= -->
+
+    <aside class="sidebar">
+
+        <div class="sidebar-header">
+
+            <h1 class="logo">
+                ⚡ Viren RAG Lab
+            </h1>
+
+            <p class="logo-subtitle">
+                Private AI Research Workspace
+            </p>
+
+            <button id="new-collection-btn">
+                + New Collection
+            </button>
+
+        </div>
+
+        <div class="sidebar-section">
+
+            <div class="section-title">
+                Collections
+            </div>
+
+            <div id="collection-list">
+
+                <div class="collection-item active">
+                    research_papers
+                </div>
+
+            </div>
+
+        </div>
+
+        <div class="sidebar-section">
+
+            <div class="section-title">
+                Sessions
+            </div>
+
+            <div id="session-list"></div>
+
+        </div>
+
+    </aside>
+
+    <!-- ================================= -->
+    <!-- CHAT AREA -->
+    <!-- ================================= -->
+
+    <main class="chat-area">
+
+        <div class="chat-header">
+
+            <div>
+
+                <h2>
+                    Research Papers
+                </h2>
+
+                <p>
+                    Ask questions about your documents
+                </p>
+
+            </div>
+
+            <div class="header-actions">
+
+                <button id="upload-btn">
+                    Upload PDF
+                </button>
+
+                <button id="new-chat-btn">
+                    New Chat
+                </button>
+
+            </div>
+
+        </div>
+
+        <!-- CHAT MESSAGES -->
+
+        <div id="chat-messages">
+
+            <div class="message assistant">
+
+                <div class="message-content">
+
+                    Welcome to Viren RAG LAB.
+                    Upload documents and start asking questions.
+
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- INPUT -->
+
+        <div class="chat-input-container">
+
+            <textarea
+                id="chat-input"
+                placeholder="Ask a question..."></textarea>
+
+            <button id="send-btn">
+                Send
+            </button>
+
+        </div>
+
+    </main>
+
+    <!-- ================================= -->
+    <!-- RIGHT PANEL -->
+    <!-- ================================= -->
+
+    <aside class="right-panel">
+
+        <!-- SOURCES -->
+
+        <div class="panel-card">
+
+            <h3>
+                Sources
+            </h3>
+
+            <div id="source-panel">
+
+                <div class="source-card">
+
+                    <div class="source-title">
+                        No sources
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- COLLECTION STATS -->
+
+        <div class="panel-card">
+
+            <h3>
+                Collection Stats
+            </h3>
+
+            <div id="collection-stats">
+
+                <div class="metric">
+
+                    <span>
+                        Documents
+                    </span>
+
+                    <span id="stat-documents">
+                        0
+                    </span>
+
+                </div>
+
+                <div class="metric">
+
+                    <span>
+                        Sessions
+                    </span>
+
+                    <span id="stat-sessions">
+                        0
+                    </span>
+
+                </div>
+
+                <div class="metric">
+
+                    <span>
+                        Messages
+                    </span>
+
+                    <span id="stat-messages">
+                        0
+                    </span>
+
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- RETRIEVAL SETTINGS -->
+
+        <div class="panel-card">
+
+            <h3>
+                Retrieval Settings
+            </h3>
+
+            <div class="setting-group">
+
+                <label>
+                    Dense K
+                </label>
+
+                <input
+                    type="number"
+                    id="dense-k"
+                    value="20">
+
+            </div>
+
+            <div class="setting-group">
+
+                <label>
+                    BM25 K
+                </label>
+
+                <input
+                    type="number"
+                    id="bm25-k"
+                    value="20">
+
+            </div>
+
+            <div class="setting-group">
+
+                <label>
+                    Candidates
+                </label>
+
+                <input
+                    type="number"
+                    id="rerank-k"
+                    value="20">
+
+            </div>
+
+            <div class="setting-group">
+
+                <label>
+                    Final K
+                </label>
+
+                <input
+                    type="number"
+                    id="final-k"
+                    value="5">
+
+            </div>
+
+        </div>
+
+        <!-- METRICS -->
+
+        <div class="panel-card">
+
+            <h3>
+                Metrics
+            </h3>
+
+            <div id="metrics-panel">
+
+                <div class="metric">
+
+                    <span>
+                        Dense
+                    </span>
+
+                    <span>
+                        0 ms
+                    </span>
+
+                </div>
+
+                <div class="metric">
+
+                    <span>
+                        BM25
+                    </span>
+
+                    <span>
+                        0 ms
+                    </span>
+
+                </div>
+
+                <div class="metric">
+
+                    <span>
+                        Rerank
+                    </span>
+
+                    <span>
+                        0 ms
+                    </span>
+
+                </div>
+
+                <div class="metric">
+
+                    <span>
+                        Total
+                    </span>
+
+                    <span>
+                        0 ms
+                    </span>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </aside>
+
+</div>
+
+<!-- ================================= -->
+<!-- CREATE COLLECTION MODAL -->
+<!-- ================================= -->
+
+<div
+    id="collection-modal"
+    class="modal hidden">
+
+    <div class="modal-content">
+
+        <h2>
+            Create Collection
+        </h2>
+
+        <input
+            id="collection-name"
+            type="text"
+            placeholder="Collection Name">
+
+        <textarea
+            id="collection-description"
+            placeholder="Collection Description"></textarea>
+
+        <div class="modal-actions">
+
+            <button id="create-collection-confirm">
+                Create
+            </button>
+
+            <button id="close-collection-modal">
+                Cancel
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+
+<!-- ================================= -->
+<!-- UPLOAD MODAL -->
+<!-- ================================= -->
+
+<div
+    id="upload-modal"
+    class="modal hidden">
+
+    <div class="modal-content">
+
+        <h2>
+            Upload Documents
+        </h2>
+
+        <input
+            id="pdf-upload"
+            type="file"
+            multiple
+            accept=".pdf">
+
+        <div class="modal-actions">
+
+            <button id="upload-confirm">
+                Upload
+            </button>
+
+            <button id="close-upload-modal">
+                Cancel
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+
+<script src="app.js"></script>
+
