@@ -306,22 +306,22 @@ def run_router():
 # EVALUATION
 # --------------------------------------------------
 
-def run_eval():
+# def run_eval():
 
-    from evaluate_hybrid import (
-        main
-    )
+#     from evaluate_hybrid import (
+#         main
+#     )
 
-    main()
+#     main()
 
 
-def run_ragas():
+# def run_ragas():
 
-    from evaluate_own_ragas_v2 import (
-        main
-    )
+#     from evaluate_own_ragas_v2 import (
+#         main
+#     )
 
-    main()
+#     main()
 
 
 # --------------------------------------------------
@@ -382,11 +382,11 @@ def main():
     elif mode == "router":
         run_router()
 
-    elif mode == "eval":
-        run_eval()
+    # elif mode == "eval":
+    #     run_eval()
 
-    elif mode == "ragas":
-        run_ragas()
+    # elif mode == "ragas":
+    #     run_ragas()
 
 
 if __name__ == "__main__":

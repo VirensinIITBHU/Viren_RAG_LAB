@@ -30,3 +30,4 @@ mini_ragas_v2_results.csv
 firstrag.db
 
 
+local_qdrant_db
