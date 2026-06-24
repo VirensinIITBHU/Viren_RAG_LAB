@@ -155,7 +155,7 @@ virenraglab/
 ### Clone Repository
 
 ```bash
-git clone https://github.com/<username>/virenraglab.git
+git clone https://github.com/VirensinIITBHU/virenraglab.git
 
 cd virenraglab
 ```
