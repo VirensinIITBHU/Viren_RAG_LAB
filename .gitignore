@@ -5,6 +5,8 @@ venv/
 # Python
 __pycache__/
 *.pyc
+.pytest_cache/
+.mypy_cache/
 
 # Secrets
 .env
@@ -23,11 +25,17 @@ test.py
 test1.py
 mini_ragas_v2_results.csv
 
-
 # Local databases
 *.db
 *.sqlite
 firstrag.db
 
+# Local Qdrant
+local_qdrant_db/
 
-local_qdrant_db
+# User uploaded documents
+user_uploads/*
+!user_uploads/.gitkeep
+*.log
+hf_cache/
+models/
