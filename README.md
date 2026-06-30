@@ -1,4 +1,4 @@
-# ⚡ VirenRAGLab — The Observable Hybrid RAG Simulator
+#  VirenRAGLab — The Observable Hybrid RAG Simulator
 
 <div align="center">
 
