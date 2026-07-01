@@ -1,20 +1,19 @@
 """
 reranker.py
 
-Production Cross Encoder Reranker (Parent-Child Aware)
+Production Cross Encoder Reranker (Child-Chunk Aware)
 
 Features
 --------
-✓ Singleton Loading
-✓ GPU / CPU Detection
+✓ Thread-Safe Singleton Loading
+✓ GPU / CPU Auto-Detection
 ✓ Torch Inference Mode
-✓ Batch Processing
-✓ Empty Candidate Safety
-✓ FastAPI Ready
-✓ Latency Profiling
+✓ Graceful Degradation on Malformed Text
+✓ Schema-Consistent Chunk Mapping
 """
 
 import time
+import threading
 import torch
 
 from sentence_transformers import CrossEncoder
@@ -27,7 +26,7 @@ MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 DEFAULT_BATCH_SIZE = 32
 
 # ==================================================
-# DEVICE
+# DEVICE CONFIGURATION
 # ==================================================
 
 if torch.cuda.is_available():
@@ -38,20 +37,23 @@ else:
     DEVICE = "cpu"
 
 # ==================================================
-# SINGLETON
+# SINGLETON RERANKER (THREAD-SAFE)
 # ==================================================
 
 _reranker = None
+_reranker_lock = threading.Lock()
 
 def get_reranker():
     global _reranker
     if _reranker is None:
-        print(f"Loading reranker on {DEVICE}")
-        _reranker = CrossEncoder(
-            MODEL_NAME,
-            device=DEVICE,
-        )
-        print("Reranker loaded.")
+        with _reranker_lock:
+            if _reranker is None:
+                print(f"Loading reranker on {DEVICE}...")
+                _reranker = CrossEncoder(
+                    MODEL_NAME,
+                    device=DEVICE,
+                )
+                print("Reranker loaded.")
     return _reranker
 
 # ==================================================
@@ -60,7 +62,7 @@ def get_reranker():
 
 def rerank(
     query: str,
-    candidates,
+    candidates: list,
     batch_size: int = DEFAULT_BATCH_SIZE,
 ):
     start = time.perf_counter()
@@ -77,39 +79,48 @@ def rerank(
         }
 
     reranker = get_reranker()
-    print(f"Reranker device: {DEVICE}")
     
     pairs = []
     
-    # FIX: Renamed chunk_id to parent_id to match upstream data
-    for (parent_id, payload) in candidates:
-        pairs.append(
-            (
-                query,
-                # The text was injected by retrieve_reranked_hybrid.py
-                payload.get("text", ""), 
+    # --------------------------------------------------
+    # 1. Prepare Text Pairs
+    # --------------------------------------------------
+    # The hybrid pipeline passes (chunk_id, payload) tuples.
+    # We extract the precise child text for accurate Cross-Encoder scoring.
+    for chunk_id, payload in candidates:
+        text = payload.get("text", "").strip()
+        pairs.append((query, text))
+
+    # --------------------------------------------------
+    # 2. Predict Scores
+    # --------------------------------------------------
+    try:
+        with torch.inference_mode():
+            scores = reranker.predict(
+                pairs,
+                batch_size=batch_size,
+                show_progress_bar=False,
             )
-        )
+    except Exception as e:
+        print(f"WARNING: Reranker inference failed: {e}")
+        # Graceful degradation: assign 0 score if tensor operation fails
+        scores = [0.0] * len(pairs)
 
-    with torch.inference_mode():
-        scores = reranker.predict(
-            pairs,
-            batch_size=batch_size,
-            show_progress_bar=False,
-        )
-
+    # --------------------------------------------------
+    # 3. Reconstruct & Sort
+    # --------------------------------------------------
     reranked = []
     
-    # FIX: Renamed chunk_id to parent_id
-    for (parent_id, payload), score in zip(candidates, scores):
+    for (chunk_id, payload), score in zip(candidates, scores):
         reranked.append(
             (
-                parent_id,
+                chunk_id,
                 payload,
                 float(score),
             )
         )
 
+    # Sort descending by Cross-Encoder score
     reranked.sort(
         key=lambda x: x[2],
         reverse=True,
@@ -132,20 +143,20 @@ def rerank(
 # ==================================================
 
 if __name__ == "__main__":
-    # Updated test candidates to mimic the new architecture
+    # Mocking the (chunk_id, payload) schema from the hybrid pipeline
     sample_candidates = [
         (
-            101, # parent_id
+            1001, 
             {
                 "paper_name": "Attention Is All You Need",
                 "text": "LoRA is a parameter efficient fine tuning method."
             },
         ),
         (
-            102, # parent_id
+            1002,
             {
                 "paper_name": "Attention Is All You Need",
-                "text": "Transformers use self attention."
+                "text": "Transformers use self attention mechanisms."
             },
         ),
     ]
@@ -155,8 +166,9 @@ if __name__ == "__main__":
         candidates=sample_candidates,
     )
 
+    print("\nMetrics:")
     print(response["metrics"])
     print()
 
     for result in response["results"]:
-        print(f"Parent ID: {result[0]} | Score: {result[2]:.4f} | Text: {result[1]['text']}")
+        print(f"Chunk ID: {result[0]} | Score: {result[2]:.4f} | Text: {result[1]['text']}")

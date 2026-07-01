@@ -1,181 +1,50 @@
 """
 retrieve_bm25.py
 
-Production BM25 Retriever
+Production BM25 Retriever (Native Qdrant Sparse Search)
 
 Architecture
-
-Qdrant
- ↓
-Build BM25 Once
- ↓
-Cache Per Collection
- ↓
-Retrieve
+------------
+Query
+    ↓
+FastEmbed Sparse Text Embedding (Qdrant/bm25)
+    ↓
+Qdrant Named Vector Search (using="bm25")
 
 Features
 --------
+✓ Stateless (No Memory Bloat)
+✓ Real-time (No Index Rebuilds)
 ✓ Qdrant Cloud Compatible
-✓ Collection Aware
-✓ Cached BM25
-✓ No Pickles
-✓ FastAPI Ready
-✓ Latency Profiling
+✓ Thread-Safe Singleton
 """
 
-import re
 import time
+import threading
+from typing import Any, Dict
 
-from rank_bm25 import BM25Okapi
+from qdrant_client import models
+from fastembed import SparseTextEmbedding
 
-from retrieve import (
-    get_qdrant_client,
-)
-
-# ==================================================
-# CACHE
-# ==================================================
-
-_bm25_cache = {}
-
+# Reuse the client singleton from the dense retriever
+from retrieve import get_qdrant_client
 
 # ==================================================
-# TOKENIZER
+# SINGLETON MODEL
 # ==================================================
 
-def tokenize(
-    text: str,
-):
+_sparse_model = None
+_model_lock = threading.Lock()
 
-    text = text.lower()
-
-    text = re.sub(
-        r"[^a-z0-9\s]",
-        " ",
-        text,
-    )
-
-    return text.split()
-
-
-# ==================================================
-# LOAD COLLECTION FROM QDRANT
-# ==================================================
-
-def load_collection_chunks(
-    collection_name: str,
-):
-
-    client = (
-        get_qdrant_client()
-    )
-
-    all_points = []
-
-    next_offset = None
-
-    while True:
-
-        points, next_offset = (
-            client.scroll(
-                collection_name=
-                collection_name,
-
-                limit=1000,
-
-                offset=
-                next_offset,
-
-                with_payload=True,
-
-                with_vectors=False,
-            )
-        )
-
-        all_points.extend(
-            points
-        )
-
-        if next_offset is None:
-            break
-
-    return all_points
-
-
-# ==================================================
-# BUILD INDEX
-# ==================================================
-
-def get_bm25_index(
-    collection_name: str,
-):
-
-    global _bm25_cache
-
-    if (
-        collection_name
-        in _bm25_cache
-    ):
-
-        return _bm25_cache[
-            collection_name
-        ], True
-
-    print(
-        f"Building BM25 index "
-        f"for {collection_name}"
-    )
-
-    points = (
-        load_collection_chunks(
-            collection_name
-        )
-    )
-
-    corpus = []
-
-    payloads = []
-
-    for point in points:
-
-        payload = (
-            point.payload
-            or {}
-        )
-
-        text = payload.get(
-            "text"
-        )
-
-        if not text:
-            continue
-
-        corpus.append(
-            tokenize(text)
-        )
-
-        payloads.append(
-            payload
-        )
-
-    bm25 = BM25Okapi(
-        corpus
-    )
-
-    index_data = {
-
-        "bm25":
-        bm25,
-
-        "payloads":
-        payloads,
-    }
-
-    _bm25_cache[
-        collection_name
-    ] = index_data
-
-    return index_data, False
+def get_sparse_model():
+    global _sparse_model
+    if _sparse_model is None:
+        with _model_lock:
+            if _sparse_model is None:  # Double-checked locking
+                print("Loading sparse BM25 model...")
+                _sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25")
+                print("Sparse model loaded.")
+    return _sparse_model
 
 
 # ==================================================
@@ -186,109 +55,88 @@ def bm25_retrieve(
     query: str,
     collection_name: str,
     k: int = 10,
-):
+) -> Dict[str, Any]:
 
-    start = (
-        time.perf_counter()
+    start = time.perf_counter()
+
+    client = get_qdrant_client()
+    sparse_model = get_sparse_model()
+
+    # ------------------------------
+    # Embed Query (Sparse)
+    # ------------------------------
+    embed_start = time.perf_counter()
+    
+    # fastembed's query_embed returns an iterable of SparseEmbedding objects
+    query_sparse_embedding = list(sparse_model.query_embed(query))[0]
+    embedding_ms = round((time.perf_counter() - embed_start) * 1000, 2)
+
+    # ------------------------------
+    # Qdrant Search
+    # ------------------------------
+    search_start = time.perf_counter()
+
+    # Convert to Qdrant's expected SparseVector format
+    query_vector = models.SparseVector(
+        indices=query_sparse_embedding.indices.tolist(),
+        values=query_sparse_embedding.values.tolist(),
     )
 
-    index_data ,cache_hit= (
-        get_bm25_index(
-            collection_name
+    try:
+        response = client.query_points(
+            collection_name=collection_name,
+            query=query_vector,
+            using="bm25",       # Explicitly target the named sparse vector
+            limit=k,
+            with_payload=True,  # Fetch full payload including text
         )
-    )
-
-    bm25 = (
-        index_data["bm25"]
-    )
-
-    payloads = (
-        index_data["payloads"]
-    )
-
-    tokenized_query = (
-        tokenize(query)
-    )
-
-    scores = (
-        bm25.get_scores(
-            tokenized_query
-        )
-    )
-
-    ranked_indices = sorted(
-        range(len(scores)),
-        key=lambda i: scores[i],
-        reverse=True,
-    )
+    except Exception as e:
+        raise RuntimeError(f"Qdrant sparse retrieval failed: {e}")
 
     results = []
-
-    for idx in ranked_indices[:k]:
-
+    for point in response.points:
+        payload = point.payload or {}
         results.append({
-
-            "score":
-            float(
-                scores[idx]
-            ),
-
-            "payload":
-            payloads[idx],
+            "score": float(point.score),
+            "payload": payload,
+            # Explicitly expose keys to match the fusion pipeline expectations
+            "chunk_id": payload.get("chunk_id"),
+            "parent_id": payload.get("parent_id"),
+            "paper_name": payload.get("paper_name"),
         })
 
-    total_ms = round(
-        (
-            time.perf_counter()
-            - start
-        ) * 1000,
-        2,
-    )
+    vector_search_ms = round((time.perf_counter() - search_start) * 1000, 2)
+    total_ms = round((time.perf_counter() - start) * 1000, 2)
 
     return {
-
-        "results":
-        results,
-
+        "results": results,
         "metrics": {
-
-            "bm25_ms":
-            total_ms,
-
-            "collection":
-            collection_name,
-
-            "cache_hit":
-            cache_hit,
+            "embedding_ms": embedding_ms,
+            "vector_search_ms": vector_search_ms,
+            "bm25_ms": total_ms,
+            "collection": collection_name,
+            "cache_hit": False,  # Kept for frontend metrics compatibility
         },
     }
 
 
 # ==================================================
-# CACHE MANAGEMENT
+# LEGACY CACHE MANAGEMENT (DEPRECATED)
 # ==================================================
+# These functions are kept as safe no-ops so that app.py and upload.py 
+# do not throw import errors or crash before they are updated.
+
+def get_bm25_index(collection_name: str):
+    """Legacy warmup hook. Now just warms the FastEmbed model."""
+    get_sparse_model()
+    return {}, False
 
 def clear_bm25_cache():
+    pass
 
-    global _bm25_cache
-
-    _bm25_cache = {}
-
-    print(
-        "BM25 cache cleared."
-    )
-
-
-def invalidate_collection_cache(
-    collection_name: str,
-):
-
-    global _bm25_cache
-
-    _bm25_cache.pop(
-        collection_name,
-        None,
-    )
+def invalidate_collection_cache(collection_name: str):
+    """Legacy invalidation hook. Native Qdrant handles state automatically."""
+    pass
 
 
 # ==================================================
@@ -296,39 +144,17 @@ def invalidate_collection_cache(
 # ==================================================
 
 if __name__ == "__main__":
-
-    response = (
-        bm25_retrieve(
-
-            query=
-            "What is LoRA?",
-
-            collection_name=
-            "research_papers",
-
-            k=5,
-        )
+    response = bm25_retrieve(
+        query="What is LoRA?",
+        collection_name="research_papers",
+        k=5,
     )
 
-    print(
-        response["metrics"]
-    )
+    print("\nMetrics:")
+    print(response["metrics"])
 
-    print()
-
-    for result in response[
-        "results"
-    ]:
-
-        print(
-            result["score"]
-        )
-
-        print(
-            result["payload"]
-            .get(
-                "paper_name"
-            )
-        )
-
-        print("-" * 50)
+    for rank, result in enumerate(response["results"], start=1):
+        print(f"\nRank {rank}")
+        print(f"Score: {result['score']:.4f}")
+        print(f"Chunk ID: {result['chunk_id']}")
+        print(f"Paper: {result['paper_name']}")
