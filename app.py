@@ -67,35 +67,11 @@ from database import SessionLocal, list_collections
 from retrieve_bm25 import get_bm25_index
 
 def warmup_bm25():
-
-    print("\nBuilding BM25 caches...")
-
-    db = SessionLocal()
-
-    try:
-
-        collections = list_collections(db)
-
-        if not collections:
-            print("No collections found.")
-            return
-
-        for collection in collections:
-
-            print(
-                f"→ {collection.name}"
-            )
-
-            get_bm25_index(
-                collection.name
-            )
-
-        print("BM25 cache ready.")
-
-    finally:
-
-        db.close()
-
+    """Warms the FastEmbed sparse model in memory."""
+    print("\nWarming sparse BM25 model...")
+    from retrieve_bm25 import get_sparse_model
+    get_sparse_model()
+    print("Sparse model ready.")
 
 @app.on_event("startup")
 def startup():

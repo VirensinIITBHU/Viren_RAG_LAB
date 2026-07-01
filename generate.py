@@ -7,13 +7,11 @@ Features
 --------
 ✓ Source Grounded Answers
 ✓ Citation Aware
-✓ Hybrid Retrieval Support
+✓ Hybrid Retrieval Support (with Hydration)
 ✓ Follow-Up Handling
 ✓ Query Rewriting
-✓ Llama 3.1 8B
-✓ Frontend Configurable Retrieval
-✓ Hallucination Guard
 ✓ FastAPI Ready
+✓ Observability Pipeline
 """
 
 import os
@@ -22,10 +20,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from router import decide_route
-from retrieve_reranked_hybrid import (
-    retrieve_hybrid,
-    format_sources,
-)
+from retrieve_reranked_hybrid import retrieve_hybrid
 
 load_dotenv()
 
@@ -121,29 +116,30 @@ def build_context(retrieval_results):
     context_blocks = []
     source_mapping = []
 
-    # FIX 1: Unpack parent_id instead of chunk_id
-    for idx, (parent_id, payload, score) in enumerate(retrieval_results, start=1):
+    # Unpack based on the new schema: (chunk_id, payload, score)
+    for idx, (chunk_id, payload, score) in enumerate(retrieval_results, start=1):
         source_id = f"SOURCE_{idx}"
         paper_name = payload.get("paper_name", "Unknown")
-        child_chunk_id = payload.get("child_chunk_id", "?")
+        parent_id = payload.get("parent_id", "N/A")
+        is_expanded = payload.get("context_expanded", False)
         
         raw_page = payload.get("page")
         if raw_page is None:
-            raw_page = payload.get("page_number", "?")
+            raw_page = payload.get("page_number")
             
         if isinstance(raw_page, int):
             page = str(raw_page + 1)
         else:
-            page = str(raw_page)
+            page = str(raw_page) if raw_page is not None else "?"
             
         text = payload.get("text", "")
+        context_type = "Expanded Parent Context" if is_expanded else "Precise Child Context"
 
         block = f"""
 {source_id}
 Paper: {paper_name}
-Parent ID: {parent_id}
-Triggered by Child ID: {child_chunk_id}
 Page: {page}
+Type: {context_type}
 
 Text:
 {text}
@@ -154,8 +150,10 @@ Text:
             "source_id": source_id,
             "paper_name": paper_name,
             "parent_id": parent_id,
+            "chunk_id": chunk_id,
             "page": page,
             "score": round(score, 4),
+            "expanded": is_expanded,
             "content": text  
         })
 
@@ -285,9 +283,9 @@ def generate_answer(
     retrieval_metrics = retrieval_response["metrics"]
     
     print("\nRetrieved Sources:\n")
-    # FIX 1 (Continued): Update loop variables
-    for parent_id, payload, score in retrieval_results:
-        print(f"{payload.get('paper_name')} | Score: {score:.4f}")
+    for chunk_id, payload, score in retrieval_results:
+        status = "[EXPANDED]" if payload.get("context_expanded") else "[CHILD]"
+        print(f"{payload.get('paper_name')} | Score: {score:.4f} | {status}")
 
     generation_start = time.perf_counter()
     answer, sources = generate_rag_response(
@@ -347,5 +345,4 @@ if __name__ == "__main__":
     print("\n" + "="*50)
     print("METRICS:")
     print("="*50)
-    # FIX 2: Fixed the KeyError by calling the correct dictionary key
     print(response["retrieval"])
