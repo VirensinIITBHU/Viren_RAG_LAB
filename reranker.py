@@ -106,6 +106,9 @@ def rerank(
         # Graceful degradation: assign 0 score if tensor operation fails
         scores = [0.0] * len(pairs)
 
+
+    scores = torch.sigmoid(torch.tensor(scores)).tolist()
+
     # --------------------------------------------------
     # 3. Reconstruct & Sort
     # --------------------------------------------------

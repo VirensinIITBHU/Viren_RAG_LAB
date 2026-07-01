@@ -332,6 +332,8 @@ def build_chat_history(db: Session, session_id: int):
         })
     return history
 
+Base.metadata.create_all(bind=engine)
+
 if __name__ == "__main__":
     init_db()
     print("Database ready.")

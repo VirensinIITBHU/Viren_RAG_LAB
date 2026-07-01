@@ -40,7 +40,7 @@ RRF_K = 60
 def reciprocal_rank_fusion(bm25_results, dense_results, rrf_k: int = RRF_K):
     """
     Fuses two ranked lists using Reciprocal Rank Fusion.
-    Score = Σ 1 / (rrf_k + rank)
+    Returns normalized scores [0, 1] for display as confidence.
     """
     fused_scores = defaultdict(float)
 
@@ -56,7 +56,21 @@ def reciprocal_rank_fusion(bm25_results, dense_results, rrf_k: int = RRF_K):
         if chunk_id is not None:
             fused_scores[chunk_id] += 1.0 / (rrf_k + rank)
 
-    return sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
+    if not fused_scores:
+        return []
+
+    # Sort to find the max score
+    sorted_scores = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
+    
+    # Normalize by the highest score so the top result is always 1.0 (100%)
+    max_score = sorted_scores[0][1]
+    
+    normalized_results = [
+        (chunk_id, score / max_score) 
+        for chunk_id, score in sorted_scores
+    ]
+
+    return normalized_results
 
 
 def build_chunk_map(bm25_results, dense_results):

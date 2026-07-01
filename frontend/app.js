@@ -672,13 +672,12 @@ function appendMessage(role, content, msgIndex = null) {
     if (role === "assistant") {
         let safeContent = content.replace(/</g, "&lt;").replace(/>/g, "&gt;");
         
-        // Pass the specific msgIndex into the click handler!
-        // Inside appendMessage, update the SOURCE_X regex replace:
+        // NEW: Parse markdown bold (**) into HTML <b> tags
+        safeContent = safeContent.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+        
         safeContent = safeContent.replace(/SOURCE_(\d+)/g, (match, p1) => {
-            const sourceIdx = parseInt(p1) - 1; // 0-based index
-            // Note: We need a way to look up the content. 
-            // This assumes the assistant message object has a 'sources' property.
-            return `<span class="source-ref" onclick="loadAndHighlightSource(${msgIndex}, ${p1})">
+            const sourceIdx = parseInt(p1) - 1;
+            return `<span class="source-ref" onclick="loadAndHighlightSource(${msgIndex}, ${sourceIdx})">
                         ${p1}
                         <div class="source-preview-popup">Loading preview...</div>
                     </span>`;
@@ -709,7 +708,7 @@ function renderSources(sources) {
     sources.forEach((source, index) => { // <-- Ensure 'index' is in the parameter list
         const paper = source.paper_name || source.filename || "Unknown Document";
         const page = source.page ?? source.page_number ?? "-";
-        const score = source.score ?? 0;
+        const displayScore = (Number(source.score) * 100).toFixed(1) + "%";
         const previewText = source.content || source.text || "No text preview available.";
 
         const card = document.createElement("div");
@@ -726,7 +725,7 @@ function renderSources(sources) {
                         <span>Page ${page}</span>
                     </div>
                 </div>
-                <div class="source-score">${Number(score).toFixed(4)}</div>
+                <div class="source-score">${displayScore}</div>
             </div>
             <div class="source-preview">
                 "${previewText.substring(0, 200)}${previewText.length > 200 ? '...' : ''}"
@@ -793,7 +792,7 @@ function renderMetrics(observability = {}, retrieval = {}) {
         <div class="metrics-section">
 
             <div class="metrics-title">
-                AI Observability
+                Observability
             </div>
 
             <div class="pipeline-step">

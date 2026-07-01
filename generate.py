@@ -170,7 +170,7 @@ Text:
 def generate_chat_response(query: str):
     response = get_client().chat.completions.create(
         model=MODEL_NAME,
-        temperature=0.3,
+        temperature=0.6,
         messages=[{"role": "user", "content": query}],
     )
     return response.choices[0].message.content
@@ -184,24 +184,32 @@ def generate_rag_response(query: str, history: str, retrieval_results):
     context, source_mapping = build_context(retrieval_results)
 
     prompt = f"""
-You are a highly precise research assistant.
+You are a highly precise research assistant. Your task is to answer the user's question based strictly on the provided sources and conversation history.
 
-Use ONLY the provided sources to answer the question.
+### Strict Grounding Rules:
+1. **Source Dependency:** You must rely ONLY on the provided sources. Do not hallucinate data or use outside knowledge.
+2. **Inline Citations:** Every factual claim must be immediately followed by its citation using the source ID, e.g., "The model achieved 94% accuracy [SOURCE_1]."
+3. **Multiple Citations:** If combining facts from different chunks, cite all relevant sources, e.g., "Fact A [SOURCE_1] and Fact B [SOURCE_2]."
+4. **Missing Information:** If the sources do not contain the answer, you must explicitly state: "I could not find this information in the provided documents." Do not attempt to guess.
+5. **Partial Answers:** If the sources only partially answer the question, state exactly what is known from the text, and explicitly note what is missing.
+6. **Conflicting Information:** If different sources contradict each other, objectively state both perspectives and cite them accordingly.
 
-Strict Rules:
-1. Every factual claim MUST be immediately followed by its citation, e.g., "The model achieved 94% accuracy [SOURCE_1]."
-2. Use multiple citations when combining facts: "Fact A [SOURCE_1] and Fact B [SOURCE_2]."
-3. If information is not present in the sources, you must explicitly state: "I could not find this information in the uploaded documents."
-4. Do not use outside knowledge. Do not hallucinate data.
+### Formatting & Tone:
+- Be concise, direct, and academic.
+- Use Markdown formatting (bullet points, bold text) to structure complex, multi-part answers.
+- If a source is marked as "Expanded Parent Context", use the surrounding text to provide a nuanced, well-rounded answer rather than just a single extracted sentence.
 
-Conversation:
+<conversation_history>
 {history}
+</conversation_history>
 
-Sources:
+<sources>
 {context}
+</sources>
 
-Question:
+<question>
 {query}
+</question>
 
 Answer:
 """
