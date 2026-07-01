@@ -15,12 +15,15 @@ from sqlalchemy import (
     Text,
     DateTime,
     ForeignKey,
+    UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import (
     declarative_base,
     sessionmaker,
     relationship,
 )
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 # --------------------------------------------------
 # CONFIG
@@ -33,6 +36,10 @@ engine = create_engine(
     echo=False,
     connect_args={"check_same_thread": False},
 )
+
+# Enable Write-Ahead Logging (WAL) for concurrent read/writes
+with engine.connect() as conn:
+    conn.execute(text("PRAGMA journal_mode=WAL;"))
 
 SessionLocal = sessionmaker(
     bind=engine,
@@ -104,8 +111,32 @@ class Message(Base):
     role = Column(String, nullable=False)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
-    sources = Column(Text, nullable=True) # <--- NEW COLUMN
+    sources = Column(Text, nullable=True) 
     session = relationship("ChatSession", back_populates="messages")
+
+# --------------------------------------------------
+# PARENT CHUNKS (NEW: For Advanced RAG)
+# --------------------------------------------------
+
+class DocumentChunk(Base):
+    __tablename__ = "document_chunks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    collection_name = Column(String, index=True, nullable=False)
+    parent_id = Column(Integer, index=True, nullable=False)
+    text = Column(Text, nullable=False)
+    paper_name = Column(String, nullable=True)
+
+    # Prevents duplicate parent rows when a collection is re-ingested
+    # (retry after partial failure, manual re-embed, etc.) and is the
+    # conflict target for the upsert in save_parent_chunks_batch().
+    __table_args__ = (
+        UniqueConstraint(
+            "collection_name",
+            "parent_id",
+            name="uq_document_chunks_collection_parent",
+        ),
+    )
 
 # --------------------------------------------------
 # DB INIT
@@ -113,7 +144,7 @@ class Message(Base):
 
 def init_db():
     Base.metadata.create_all(bind=engine)
-    print("Database initialized.")
+    print("Database initialized (WAL mode active).")
 
 # --------------------------------------------------
 # COLLECTION HELPERS
@@ -188,7 +219,7 @@ def update_session_title(db: Session, session_id: int, title: str):
 # MESSAGE HELPERS
 # --------------------------------------------------
 
-def add_message(db: Session, session_id: int, role: str, content: str,sources: str = None):
+def add_message(db: Session, session_id: int, role: str, content: str, sources: str = None):
     message = Message(
         session_id=session_id,
         role=role,
@@ -204,6 +235,87 @@ def add_message(db: Session, session_id: int, role: str, content: str,sources: s
     db.commit()
     db.refresh(message)
     return message
+
+# --------------------------------------------------
+# CHUNK HELPERS
+# --------------------------------------------------
+
+def save_parent_chunks_batch(db: Session, chunks_data: list[dict]):
+    """
+    Bulk upsert parent chunks into SQLite.
+
+    Uses INSERT ... ON CONFLICT DO UPDATE keyed on
+    (collection_name, parent_id) so re-running embed.py over the same
+    collection (retry after a partial failure, manual re-embed) updates
+    existing parent rows in place instead of duplicating them.
+    """
+    if not chunks_data:
+        return
+
+    stmt = sqlite_insert(DocumentChunk).values(chunks_data)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["collection_name", "parent_id"],
+        set_={
+            "text": stmt.excluded.text,
+            "paper_name": stmt.excluded.paper_name,
+        },
+    )
+    db.execute(stmt)
+    db.commit()
+
+
+def get_parent_chunks_by_ids(
+    db: Session,
+    collection_name: str,
+    parent_ids: list[int],
+) -> dict:
+    """
+    Fetches parent chunk text for small-to-big retrieval.
+
+    Given the parent_ids surfaced by the reranked child chunks, returns
+    a {parent_id: {"text": ..., "paper_name": ...}} lookup so the
+    generation layer can expand each winning child chunk to its full
+    parent context. Deduplicates automatically since callers may pass
+    the same parent_id more than once (multiple child chunks can share
+    a parent) and a single IN query covers all of them.
+    """
+    if not parent_ids:
+        return {}
+
+    unique_ids = list(set(parent_ids))
+
+    rows = (
+        db.query(DocumentChunk)
+        .filter(
+            DocumentChunk.collection_name == collection_name,
+            DocumentChunk.parent_id.in_(unique_ids),
+        )
+        .all()
+    )
+
+    return {
+        row.parent_id: {
+            "text": row.text,
+            "paper_name": row.paper_name,
+        }
+        for row in rows
+    }
+
+
+def delete_parent_chunks_for_collection(db: Session, collection_name: str):
+    """
+    Deletes all parent chunk rows for a collection.
+
+    Needed alongside the existing Qdrant collection delete in app.py's
+    DELETE /collections/{name} route — today that route drops the
+    Qdrant collection and local files but leaves orphaned rows in
+    document_chunks, which silently grows the table and can bleed into
+    a future collection that reuses the same name.
+    """
+    db.query(DocumentChunk).filter(
+        DocumentChunk.collection_name == collection_name
+    ).delete()
+    db.commit()
 
 # --------------------------------------------------
 # CHAT HISTORY FORMATTER

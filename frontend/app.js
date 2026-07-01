@@ -644,7 +644,7 @@ async function sendMessage() {
         appendMessage("assistant", data.answer || "No response.", assistantIndex);
         
         renderSources(sourcesData);
-        renderMetrics(data.retrieval_metrics || {});
+        renderMetrics(data.observability || {},data.retrieval || {});
 
         setTimeout(async () => {
             await loadSessions();
@@ -741,39 +741,157 @@ function renderSources(sources) {
 // METRICS & PIPELINE VISUALIZATION
 // ==================================================
 
-function renderMetrics(metrics) {
-    if (!metrics || Object.keys(metrics).length === 0) {
-        metricsPanel.innerHTML = "<p style='color: var(--muted); font-size: 0.9rem;'>Awaiting next query...</p>";
+function renderMetrics(observability = {}, retrieval = {}) {
+
+    if (
+        Object.keys(observability).length === 0 &&
+        Object.keys(retrieval).length === 0
+    ) {
+        metricsPanel.innerHTML =
+            "<p style='color: var(--muted); font-size:0.9rem;'>Awaiting next query...</p>";
         return;
     }
 
-    // Parse the metrics (adding fallbacks so it doesn't break)
-    const denseMs = metrics.dense_ms || 0;
-    const bm25Ms = metrics.bm25_ms || 0;
-    const rerankMs = metrics.rerank_ms || 0;
-    const totalMs = metrics.total_ms || (denseMs + bm25Ms + rerankMs);
+    const route =
+        observability.routing?.selected_route ??
+        observability.routing?.route ??
+        "N/A";
 
-    // Build the interactive pipeline visualization
+    const model =
+        observability.model ??
+        "Unknown";
+
+    const rewrite =
+        observability.rewrite_ms ?? 0;
+
+    const generation =
+        observability.generation_ms ?? 0;
+
+    const totalRequest =
+        observability.total_request_ms ?? 0;
+
+    const dense =
+        retrieval.dense_ms ?? 0;
+
+    const bm25 =
+        retrieval.bm25_ms ?? 0;
+
+    const fusion =
+        retrieval.fusion_ms ?? 0;
+
+    const rerank =
+        retrieval.rerank_ms ?? 0;
+
+    const retrievalTotal =
+        retrieval.total_ms ?? 0;
+
+    const parallel =
+        retrieval.parallel_ms ?? "-";
+
     metricsPanel.innerHTML = `
-        <div class="pipeline-step">
-            <span class="step-label">Dense Retrieval</span>
-            <span class="step-value">${denseMs} ms</span>
-        </div>
-        
-        <div class="pipeline-step">
-            <span class="step-label">BM25 Retrieval</span>
-            <span class="step-value">${bm25Ms} ms</span>
-        </div>
-        
-        <div class="pipeline-step">
-            <span class="step-label">RRF Fusion & Reranking</span>
-            <span class="step-value">${rerankMs} ms</span>
+
+        <div class="metrics-section">
+
+            <div class="metrics-title">
+                AI Observability
+            </div>
+
+            <div class="pipeline-step">
+                <span class="step-label">Route</span>
+                <span class="step-value">${route}</span>
+            </div>
+
+            <div class="pipeline-step">
+                <span class="step-label">Model</span>
+                <span class="step-value">${model}</span>
+            </div>
+
         </div>
 
-        <div class="pipeline-step">
-            <span class="step-label" style="color: var(--accent); font-weight: 600;">Total Pipeline Latency</span>
-            <span class="step-value" style="font-size: 0.95rem; font-weight: 700;">${totalMs} ms</span>
+
+        <div class="metrics-divider"></div>
+
+
+        <div class="metrics-section">
+
+            <div class="metrics-title">
+                Retrieval Pipeline
+            </div>
+
+            <div class="pipeline-step">
+                <span class="step-label">Query Rewrite</span>
+                <span class="step-value">${rewrite} ms</span>
+            </div>
+
+            <div class="pipeline-step">
+                <span class="step-label">Dense Retrieval</span>
+                <span class="step-value">${dense} ms</span>
+            </div>
+
+            <div class="pipeline-step">
+                <span class="step-label">BM25 Retrieval</span>
+                <span class="step-value">${bm25} ms</span>
+            </div>
+
+            <div class="pipeline-step">
+                <span class="step-label">Fusion</span>
+                <span class="step-value">${fusion} ms</span>
+            </div>
+
+            <div class="pipeline-step">
+                <span class="step-label">Reranker</span>
+                <span class="step-value">${rerank} ms</span>
+            </div>
+
+            <div class="pipeline-step">
+                <span class="step-label">Parallel Stage</span>
+                <span class="step-value">${parallel} ms</span>
+            </div>
+
+            <div class="pipeline-step">
+                <span class="step-label">
+                    Retrieval Total
+                </span>
+
+                <span class="step-value">
+                    ${retrievalTotal} ms
+                </span>
+            </div>
+
         </div>
+
+
+        <div class="metrics-divider"></div>
+
+
+        <div class="metrics-section">
+
+            <div class="metrics-title">
+                Generation
+            </div>
+
+            <div class="pipeline-step">
+                <span class="step-label">
+                    LLM Generation
+                </span>
+
+                <span class="step-value">
+                    ${generation} ms
+                </span>
+            </div>
+
+            <div class="pipeline-step">
+                <span class="step-label" style="font-weight:700;color:var(--accent)">
+                    Total Request
+                </span>
+
+                <span class="step-value" style="font-weight:700">
+                    ${totalRequest} ms
+                </span>
+            </div>
+
+        </div>
+
     `;
 }
 

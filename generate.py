@@ -1,7 +1,7 @@
 """
 generate.py
 
-Production Generation Service
+Production Generation Service (Parent-Child Aware)
 
 Features
 --------
@@ -10,14 +10,14 @@ Features
 ✓ Hybrid Retrieval Support
 ✓ Follow-Up Handling
 ✓ Query Rewriting
-✓ Llama 3.3 70B
+✓ Llama 3.1 8B
 ✓ Frontend Configurable Retrieval
 ✓ Hallucination Guard
 ✓ FastAPI Ready
 """
 
 import os
-
+import time
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -33,9 +33,7 @@ load_dotenv()
 # CONFIG
 # ==================================================
 
-MODEL_NAME = (
-    "meta-llama/llama-3.3-70b-instruct"
-)
+MODEL_NAME = "meta-llama/llama-3.1-8b-instruct"
 
 # ==================================================
 # OPENROUTER CLIENT
@@ -43,21 +41,13 @@ MODEL_NAME = (
 
 _client = None
 
-
 def get_client():
-
     global _client
-
     if _client is None:
-
         _client = OpenAI(
-            api_key=os.getenv(
-                "OPEN_ROUTER_KEY"
-            ),
-            base_url=
-            "https://openrouter.ai/api/v1",
+            api_key=os.getenv("OPEN_ROUTER_KEY"),
+            base_url="https://openrouter.ai/api/v1",
         )
-
     return _client
 
 
@@ -65,35 +55,20 @@ def get_client():
 # HISTORY HELPERS
 # ==================================================
 
-def format_history(
-    chat_history,
-):
-
+def format_history(chat_history):
     if not chat_history:
-
-        return (
-            "No previous conversation."
-        )
+        return "No previous conversation."
 
     return "\n".join(
-
-        f"{msg['role']}: "
-        f"{msg['content']}"
-
+        f"{msg['role']}: {msg['content']}"
         for msg in chat_history[-8:]
     )
 
 
-def format_user_history(
-    chat_history,
-):
-
+def format_user_history(chat_history):
     return "\n".join(
-
         msg["content"]
-
         for msg in chat_history
-
         if msg["role"] == "user"
     )
 
@@ -102,45 +77,22 @@ def format_user_history(
 # QUERY REWRITE
 # ==================================================
 
-def rewrite_query(
-    query: str,
-    chat_history: list,
-):
-
+def rewrite_query(query: str, chat_history: list):
     if not chat_history:
         return query
 
     ambiguous_words = {
-
-        "it",
-        "this",
-        "that",
-        "they",
-        "them",
-        "their",
-        "its",
-        "those",
-        "these",
+        "it", "this", "that", "they", "them",
+        "their", "its", "those", "these",
     }
 
-    if not any(
-
-        word in query.lower().split()
-
-        for word in ambiguous_words
-
-    ):
+    if not any(word in query.lower().split() for word in ambiguous_words):
         return query
 
-    history = (
-        format_user_history(
-            chat_history
-        )
-    )
+    history = format_user_history(chat_history)
 
     prompt = f"""
-Rewrite the user's latest query
-into a standalone question.
+Rewrite the user's latest query into a standalone question.
 
 Conversation History:
 {history}
@@ -150,70 +102,35 @@ Latest Query:
 
 Return only the rewritten query.
 """
-
     try:
-
-        response = (
-            get_client()
-            .chat
-            .completions
-            .create(
-
-                model=MODEL_NAME,
-
-                temperature=0,
-
-                messages=[
-                    {
-                        "role":
-                        "user",
-
-                        "content":
-                        prompt,
-                    }
-                ],
-            )
+        response = get_client().chat.completions.create(
+            model=MODEL_NAME,
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}],
         )
-
-        return (
-            response
-            .choices[0]
-            .message.content
-            .strip()
-        )
-
+        return response.choices[0].message.content.strip()
     except Exception:
-
         return query
+
 
 # ==================================================
 # CONTEXT BUILDER
 # ==================================================
 
-def build_context(
-    retrieval_results,
-):
-
+def build_context(retrieval_results):
     context_blocks = []
     source_mapping = []
 
-    for idx, (
-        chunk_id,
-        payload,
-        score,
-    ) in enumerate(
-        retrieval_results,
-        start=1,
-    ):
-
+    # FIX 1: Unpack parent_id instead of chunk_id
+    for idx, (parent_id, payload, score) in enumerate(retrieval_results, start=1):
         source_id = f"SOURCE_{idx}"
         paper_name = payload.get("paper_name", "Unknown")
-        paper_name = payload.get("paper_name", "Unknown")
+        child_chunk_id = payload.get("child_chunk_id", "?")
+        
         raw_page = payload.get("page")
         if raw_page is None:
             raw_page = payload.get("page_number", "?")
             
-        # Add 1 to fix zero-indexing, and convert to string!
         if isinstance(raw_page, int):
             page = str(raw_page + 1)
         else:
@@ -223,27 +140,20 @@ def build_context(
 
         block = f"""
 {source_id}
-
-Paper:
-{paper_name}
-
-Chunk:
-{chunk_id}
-
-Page:
-{page}
+Paper: {paper_name}
+Parent ID: {parent_id}
+Triggered by Child ID: {child_chunk_id}
+Page: {page}
 
 Text:
 {text}
 """
+        context_blocks.append(block.strip())
 
-        context_blocks.append(block)
-
-        # THE FIX: Added "content": text so the frontend can display the preview!
         source_mapping.append({
             "source_id": source_id,
             "paper_name": paper_name,
-            "chunk_id": chunk_id,
+            "parent_id": parent_id,
             "page": page,
             "score": round(score, 4),
             "content": text  
@@ -259,75 +169,32 @@ Text:
 # CHAT RESPONSE
 # ==================================================
 
-def generate_chat_response(
-    query: str,
-):
-
-    response = (
-
-        get_client()
-        .chat
-        .completions
-        .create(
-
-            model=MODEL_NAME,
-
-            temperature=0.3,
-
-            messages=[
-                {
-                    "role":
-                    "user",
-
-                    "content":
-                    query,
-                }
-            ],
-        )
+def generate_chat_response(query: str):
+    response = get_client().chat.completions.create(
+        model=MODEL_NAME,
+        temperature=0.3,
+        messages=[{"role": "user", "content": query}],
     )
-
-    return (
-        response
-        .choices[0]
-        .message.content
-    )
+    return response.choices[0].message.content
 
 
 # ==================================================
 # RAG GENERATION
 # ==================================================
 
-def generate_rag_response(
-    query: str,
-    history: str,
-    retrieval_results,
-):
-
-    context, source_mapping = (
-        build_context(
-            retrieval_results
-        )
-    )
+def generate_rag_response(query: str, history: str, retrieval_results):
+    context, source_mapping = build_context(retrieval_results)
 
     prompt = f"""
-You are a research assistant.
+You are a highly precise research assistant.
 
-Use ONLY the provided sources.
+Use ONLY the provided sources to answer the question.
 
-Rules:
-
-1. Every factual claim MUST cite:
-   [SOURCE_X]
-
-2. Use multiple citations when needed.
-
-3. If information is not present
-   in the sources, say:
-
-   "I could not find this information
-   in the uploaded documents."
-
-4. Do not use outside knowledge.
+Strict Rules:
+1. Every factual claim MUST be immediately followed by its citation, e.g., "The model achieved 94% accuracy [SOURCE_1]."
+2. Use multiple citations when combining facts: "Fact A [SOURCE_1] and Fact B [SOURCE_2]."
+3. If information is not present in the sources, you must explicitly state: "I could not find this information in the uploaded documents."
+4. Do not use outside knowledge. Do not hallucinate data.
 
 Conversation:
 {history}
@@ -341,39 +208,14 @@ Question:
 Answer:
 """
 
-    response = (
-
-        get_client()
-        .chat
-        .completions
-        .create(
-
-            model=MODEL_NAME,
-
-            temperature=0,
-
-            messages=[
-                {
-                    "role":
-                    "user",
-
-                    "content":
-                    prompt,
-                }
-            ],
-        )
+    response = get_client().chat.completions.create(
+        model=MODEL_NAME,
+        temperature=0,
+        messages=[{"role": "user", "content": prompt}],
     )
 
-    answer = (
-        response
-        .choices[0]
-        .message.content
-    )
-
-    return (
-        answer,
-        source_mapping,
-    )
+    answer = response.choices[0].message.content
+    return answer, source_mapping
 
 
 # ==================================================
@@ -381,165 +223,98 @@ Answer:
 # ==================================================
 
 def generate_answer(
-
     query: str,
-
     collection_name: str,
-
     chat_history: list = None,
-
     dense_k: int = 20,
-
     bm25_k: int = 20,
-
     rerank_candidates: int = 20,
-
     final_k: int = 5,
 ):
+    request_start = time.perf_counter()
 
     if chat_history is None:
-
         chat_history = []
 
-    history = (
-        format_history(
-            chat_history
-        )
-    )
-
-    route_result = (
-        decide_route(
-            query=query,
-            history=history,
-        )
-    )
-
-    route = (
-        route_result[
-            "route"
-        ]
-    )
+    history = format_history(chat_history)
+    route_result = decide_route(query=query, history=history)
+    route = route_result["route"]
 
     # ==========================================
-    # CHAT
+    # CHAT ROUTE
     # ==========================================
-
     if route == "CHAT":
-
-        answer = (
-            generate_chat_response(
-                query
-            )
-        )
-
+        answer = generate_chat_response(query)
         return {
-
-            "answer":
-            answer,
-
-            "route":
-            route,
-
-            "sources":
-            [],
-
-            "retrieval_metrics":
-            {},
-
-            "routing_metrics":
-            route_result,
+            "answer": answer,
+            "route": route,
+            "sources": [],
+            "retrieval": {},
+            "retrieval_metrics": {},
+            "observability": {
+                "routing": {
+                    "selected_route": route,
+                    **route_result,
+                },
+                "retrieval": {},
+                "rewrite_ms": 0,
+                "generation_ms": 0,
+                "total_request_ms": 0,
+                "model": MODEL_NAME,
+            },
+            "routing_metrics": route_result,
         }
 
     # ==========================================
-    # FOLLOWUP
+    # RAG ROUTE
     # ==========================================
+    rewrite_start = time.perf_counter()
+    standalone_query = rewrite_query(query, chat_history)
+    rewrite_ms = round((time.perf_counter() - rewrite_start) * 1000, 2)
 
-    standalone_query = (
-        rewrite_query(
-            query,
-            chat_history,
-        )
+    retrieval_response = retrieve_hybrid(
+        query=standalone_query,
+        collection_name=collection_name,
+        dense_k=dense_k,
+        bm25_k=bm25_k,
+        rerank_candidates=rerank_candidates,
+        final_k=final_k,
     )
 
-    # ==========================================
-    # RETRIEVE
-    # ==========================================
-
-    retrieval_response = (
-        retrieve_hybrid(
-
-            query=
-            standalone_query,
-
-            collection_name=
-            collection_name,
-
-            dense_k=
-            dense_k,
-
-            bm25_k=
-            bm25_k,
-
-            rerank_candidates=
-            rerank_candidates,
-
-            final_k=
-            final_k,
-        )
-    )
-
-    retrieval_results = (
-        retrieval_response[
-            "results"
-        ]
-    )
-
-    retrieval_metrics = (
-        retrieval_response[
-            "metrics"
-        ]
-    )
+    retrieval_results = retrieval_response["results"]
+    retrieval_metrics = retrieval_response["metrics"]
+    
     print("\nRetrieved Sources:\n")
+    # FIX 1 (Continued): Update loop variables
+    for parent_id, payload, score in retrieval_results:
+        print(f"{payload.get('paper_name')} | Score: {score:.4f}")
 
-    for chunk_id, payload, score in retrieval_results:
-
-        print(
-            payload.get("paper_name"),
-            score,
-        )
-
-    # ==========================================
-    # GENERATE
-    # ==========================================
-
-    answer, sources = (
-        generate_rag_response(
-
-            query=query,
-
-            history=history,
-
-            retrieval_results=
-            retrieval_results,
-        )
+    generation_start = time.perf_counter()
+    answer, sources = generate_rag_response(
+        query=query,
+        history=history,
+        retrieval_results=retrieval_results,
     )
+    generation_ms = round((time.perf_counter() - generation_start) * 1000, 2)
+    total_request_ms = round((time.perf_counter() - request_start) * 1000, 2)
 
     return {
-
-        "answer":
-        answer,
-
-        "route":
-        route,
-
-        "sources":
-        sources,
-
-        "retrieval_metrics":
-        retrieval_metrics,
-
-        "routing_metrics":
-        route_result,
+        "answer": answer,
+        "route": route,
+        "sources": sources,
+        "retrieval": retrieval_metrics,
+        "observability": {
+            "routing": {
+                "selected_route": route, 
+                **route_result
+            },
+            "retrieval": retrieval_metrics,
+            "rewrite_ms": rewrite_ms,
+            "generation_ms": generation_ms,
+            "total_request_ms": total_request_ms,
+            "model": MODEL_NAME,
+        },
+        "routing_metrics": route_result,
     }
 
 
@@ -548,40 +323,29 @@ def generate_answer(
 # ==================================================
 
 if __name__ == "__main__":
-
     response = generate_answer(
-
-        query=
-        "What is Attention Is All You Need?",
-
-        collection_name=
-        "research_papers",
-
+        query="What is Attention Is All You Need?",
+        collection_name="research_papers",
         chat_history=[],
-
         dense_k=20,
-
         bm25_k=20,
-
         rerank_candidates=20,
-
         final_k=5,
     )
 
-    print()
+    print("\n" + "="*50)
+    print("ANSWER:")
+    print("="*50)
+    print(response["answer"])
 
-    print(
-        response["answer"]
-    )
+    print("\n" + "="*50)
+    print("SOURCES:")
+    print("="*50)
+    for s in response["sources"]:
+        print(f"[{s['source_id']}] {s['paper_name']} (Parent ID: {s['parent_id']})")
 
-    print()
-
-    print(
-        response["sources"]
-    )
-
-    print()
-
-    print(
-        response["retrieval_metrics"]
-    )
+    print("\n" + "="*50)
+    print("METRICS:")
+    print("="*50)
+    # FIX 2: Fixed the KeyError by calling the correct dictionary key
+    print(response["retrieval"])

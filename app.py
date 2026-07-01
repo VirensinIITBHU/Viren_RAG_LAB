@@ -59,10 +59,63 @@ app.add_middleware(
 # STARTUP & ROUTERS
 # ==================================================
 
+from concurrent.futures import ThreadPoolExecutor
+
+from retrieve import warmup
+from reranker import get_reranker
+from database import SessionLocal, list_collections
+from retrieve_bm25 import get_bm25_index
+
+def warmup_bm25():
+
+    print("\nBuilding BM25 caches...")
+
+    db = SessionLocal()
+
+    try:
+
+        collections = list_collections(db)
+
+        if not collections:
+            print("No collections found.")
+            return
+
+        for collection in collections:
+
+            print(
+                f"→ {collection.name}"
+            )
+
+            get_bm25_index(
+                collection.name
+            )
+
+        print("BM25 cache ready.")
+
+    finally:
+
+        db.close()
+
+
 @app.on_event("startup")
 def startup():
+
     init_db()
-    print("FirstRAG API Started")
+
+    print("=" * 60)
+    print("Starting FirstRAG...")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+
+        executor.submit(warmup)
+
+        executor.submit(get_reranker)
+
+    # Build BM25 cache AFTER models are loaded
+    warmup_bm25()
+
+    print("Startup Complete")
+    print("=" * 60)
 
 app.include_router(upload_router, tags=["Upload"])
 
@@ -368,11 +421,30 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
     )
 
     return {
+
         "answer": answer,
+
         "route": response.get("route"),
+
         "sources": response.get("sources", []),
-        "retrieval_metrics": response.get("retrieval_metrics", {}),
+
+        # -----------------------------
+        # Legacy (keep frontend compatibility)
+        # -----------------------------
+        "retrieval_metrics": (
+            response.get("retrieval_metrics")
+            or response.get("retrieval", {})
+        ),
+
         "routing_metrics": response.get("routing_metrics", {}),
+
+        # -----------------------------
+        # New Observability API
+        # -----------------------------
+        "retrieval": response.get("retrieval", {}),
+
+        "observability": response.get("observability", {}),
+
         "session_title": session.title,
     }
 

@@ -35,6 +35,7 @@ import time
 from retrieve import retrieve
 from retrieve_bm25 import bm25_retrieve
 from reranker import rerank
+from concurrent.futures import ThreadPoolExecutor
 
 
 RRF_K = 60
@@ -187,60 +188,45 @@ def retrieve_hybrid(
     # BM25
     # ==========================================
 
-    bm25_start = (
-        time.perf_counter()
-    )
+    # ==========================================
+    # BM25 + DENSE (PARALLEL)
+    # ==========================================
 
-    bm25_response = (
-        bm25_retrieve(
+    parallel_start = time.perf_counter()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+
+        bm25_future = executor.submit(
+            bm25_retrieve,
             query=query,
             collection_name=collection_name,
             k=bm25_k,
         )
-    )
 
-    bm25_results = (
-        bm25_response["results"]
-    )
-
-    bm25_ms = round(
-        (
-            time.perf_counter()
-            - bm25_start
-        )
-        * 1000,
-        2,
-    )
-
-
-    # ==========================================
-    # DENSE
-    # ==========================================
-
-    dense_start = (
-        time.perf_counter()
-    )
-
-    dense_response = (
-        retrieve(
+        dense_future = executor.submit(
+            retrieve,
             query=query,
             collection_name=collection_name,
             k=dense_k,
         )
-    )
 
-    dense_results = (
-        dense_response["results"]
-    )
+        bm25_response = bm25_future.result()
+        dense_response = dense_future.result()
 
-    dense_ms = round(
-        (
-            time.perf_counter()
-            - dense_start
-        )
-        * 1000,
+    parallel_ms = round(
+        (time.perf_counter() - parallel_start) * 1000,
         2,
     )
+    print(f"BM25 + Dense retrieval completed in {parallel_ms} ms.") ##DEBUGGG
+
+    bm25_results = bm25_response["results"]
+    dense_results = dense_response["results"]
+
+    # Keep the original timings from each retriever
+
+    bm25_ms = bm25_response["metrics"]["bm25_ms"]
+
+    dense_ms = dense_response["metrics"]["total_ms"]
 
     # ==========================================
     # RRF
@@ -387,6 +373,7 @@ def retrieve_hybrid(
 
             "total_ms":
             total_ms,
+            "parallel_ms": parallel_ms,
         },
     }
 
