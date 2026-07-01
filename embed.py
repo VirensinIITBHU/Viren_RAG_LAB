@@ -24,14 +24,10 @@ import threading
 
 from dotenv import load_dotenv
 
-from FlagEmbedding import (
-    FlagAutoModel,
-)
+from FlagEmbedding import FlagAutoModel
 from fastembed import SparseTextEmbedding
 
-from qdrant_client import (
-    QdrantClient,
-)
+from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
     VectorParams,
@@ -42,13 +38,8 @@ from qdrant_client.models import (
 )
 from tqdm import tqdm
 
-from ingest import (
-    chunk_batches,
-)
-from database import (
-    SessionLocal, 
-    save_parent_chunks_batch
-)
+from ingest import chunk_batches
+from database import SessionLocal, save_parent_chunks_batch
 
 load_dotenv()
 
@@ -60,56 +51,63 @@ EMBED_MODEL = "BAAI/bge-small-en-v1.5"
 EMBED_BATCH_SIZE = 128
 
 # ==================================================
-# SINGLETON MODELS
+# SINGLETON MODELS (THREAD-SAFE)
 # ==================================================
 
 _model = None
+_model_lock = threading.Lock()
+
 _sparse_model = None
+_sparse_lock = threading.Lock()
 
 def get_embedding_model():
     global _model
     if _model is None:
-        print("Loading dense embedding model...")
-        _model = (
-            FlagAutoModel
-            .from_finetuned(
-                EMBED_MODEL,
-                query_instruction_for_retrieval=
-                (
-                    "Represent this sentence "
-                    "for searching relevant passages:"
-                ),
-                use_fp16=False,  
-            )
-        )
-        print("Dense embedding model loaded.")
+        with _model_lock:
+            if _model is None:
+                print("Loading dense embedding model...")
+                _model = FlagAutoModel.from_finetuned(
+                    EMBED_MODEL,
+                    query_instruction_for_retrieval=
+                    (
+                        "Represent this sentence "
+                        "for searching relevant passages:"
+                    ),
+                    use_fp16=False,  
+                )
+                print("Dense embedding model loaded.")
     return _model
 
 def get_sparse_model():
     """Loads the FastEmbed Sparse model for Qdrant BM25 equivalent."""
     global _sparse_model
     if _sparse_model is None:
-        print("Loading sparse BM25 model...")
-        _sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25")
-        print("Sparse model loaded.")
+        with _sparse_lock:
+            if _sparse_model is None:
+                print("Loading sparse BM25 model...")
+                _sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25")
+                print("Sparse model loaded.")
     return _sparse_model
 
 
 # ==================================================
-# SINGLETON CLIENT
+# SINGLETON CLIENT (THREAD-SAFE)
 # ==================================================
 
 _client = None
+_client_lock = threading.Lock()
 
 def get_qdrant_client():
     global _client
     if _client is None:
-        _client = QdrantClient(
-            url=os.getenv("QDRANT_URL"),
-            api_key=os.getenv("QDRANT_API_KEY"),
-            timeout=60
-        )
-        print("Connected to Qdrant.")
+        with _client_lock:
+            if _client is None:
+                _client = QdrantClient(
+                    url=os.getenv("QDRANT_URL"),
+                    api_key=os.getenv("QDRANT_API_KEY"),
+                    timeout=60
+                )
+                print("Connected to Qdrant.")
     return _client
 
 
@@ -151,7 +149,6 @@ def create_collection(collection_name: str):
             size=get_vector_size(),
             distance=Distance.COSINE,
         ),
-        # NEW: Initialize the sparse vector configuration for Qdrant
         sparse_vectors_config={
             "bm25": SparseVectorParams()
         },
@@ -178,6 +175,7 @@ def qdrant_upload_worker(upload_queue, collection_name):
             break
             
         points = item
+        # upsert naturally overwrites existing deterministic IDs
         client.upsert(
             collection_name=collection_name,
             points=points,
@@ -235,6 +233,7 @@ def embed_collection(
                     "text": p.page_content,
                     "paper_name": p.metadata.get("paper_name")
                 } for p in parents]
+                # Utilizing the idempotent upsert we wrote in database.py
                 save_parent_chunks_batch(db, parent_records)
 
             if not children:
@@ -247,15 +246,22 @@ def embed_collection(
             
             # Generate both dense and sparse vectors
             embeddings = model.encode(texts)
+            # list() forces the fastembed generator to evaluate immediately
             sparse_embeddings = list(sparse_model.embed(texts))
             
             embed_ms = (time.perf_counter() - embed_start) * 1000
 
             points = []
             for i, doc in enumerate(children):
+                
+                chunk_id = doc.metadata.get("chunk_id")
+                # Deterministic ID based on collection + chunk_id
+                # This guarantees that re-running embed.py overwrites old vectors instead of duplicating
+                point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{collection_name}_chunk_{chunk_id}"))
+
                 points.append(
                     PointStruct(
-                        id=str(uuid.uuid4()),
+                        id=point_id,
                         # Send both vectors as a dictionary
                         vector={
                             "": embeddings[i].tolist(),
@@ -269,7 +275,7 @@ def embed_collection(
                             "paper_name": doc.metadata.get("paper_name"),
                             "source": doc.metadata.get("source"),
                             "page": doc.metadata.get("page"),
-                            "chunk_id": doc.metadata.get("chunk_id"),
+                            "chunk_id": chunk_id,
                             "parent_id": doc.metadata.get("parent_id"),
                             "chunk_type": doc.metadata.get("chunk_type"),
                         },
