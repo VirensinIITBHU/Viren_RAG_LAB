@@ -1,22 +1,23 @@
 """
 retrieve.py
 
-Production Dense Retriever (Late Mapping)
+Production Dense Retriever (Native Qdrant Hybrid Ready)
 
 Features
 --------
-✓ Singleton Embedding Model
-✓ Singleton Qdrant Client
-✓ Qdrant Cloud Ready
-✓ FastAPI Ready
-✓ Production Safe
+✓ Thread-Safe Singleton Model & Client
+✓ Native Qdrant Dense Vector Target (using="")
+✓ Full Child-Chunk Payload Retrieval
+✓ Production Safe Error Handling
 ✓ Detailed Metrics
 """
 
 import os
 import time
+import threading
 from typing import Any, Dict
 
+import torch
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
 from FlagEmbedding import FlagAutoModel
@@ -26,45 +27,68 @@ load_dotenv()
 EMBED_MODEL = "BAAI/bge-small-en-v1.5"
 
 _model = None
-_client = None
+_model_lock = threading.Lock()
 
+_client = None
+_client_lock = threading.Lock()
 
 # ==================================================
-# EMBEDDING MODEL
+# DEVICE DETECTION
+# ==================================================
+
+if torch.cuda.is_available():
+    DEVICE = "cuda"
+elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    DEVICE = "mps"
+else:
+    DEVICE = "cpu"
+
+# ==================================================
+# EMBEDDING MODEL (THREAD-SAFE)
 # ==================================================
 
 def get_embedding_model():
     global _model
     if _model is None:
-        print(f"Loading dense embedding model: {EMBED_MODEL}")
-        _model = FlagAutoModel.from_finetuned(
-            EMBED_MODEL,
-            query_instruction_for_retrieval=
-            "Represent this sentence for searching relevant passages:",
-            use_fp16=False, # Matched to embed.py for stability
-        )
-        print("Embedding model loaded.")
+        with _model_lock:
+            if _model is None:  # Double-checked locking
+                print(f"Loading dense embedding model: {EMBED_MODEL} on {DEVICE}")
+                _model = FlagAutoModel.from_finetuned(
+                    EMBED_MODEL,
+                    query_instruction_for_retrieval=
+                    "Represent this sentence for searching relevant passages:",
+                    use_fp16=False,  # Matched to embed.py for stability
+                )
+                print("Embedding model loaded.")
     return _model
 
 
 # ==================================================
-# QDRANT CLIENT
+# QDRANT CLIENT (THREAD-SAFE)
 # ==================================================
 
 def get_qdrant_client():
     global _client
     if _client is None:
-        _client = QdrantClient(
-            url=os.getenv("QDRANT_URL"),
-            api_key=os.getenv("QDRANT_API_KEY"),
-            timeout=30,
-        )
-        print("Connected to Qdrant.")
+        with _client_lock:
+            if _client is None:
+                qdrant_url = os.getenv("QDRANT_URL")
+                qdrant_api_key = os.getenv("QDRANT_API_KEY")
+                
+                if not qdrant_url or not qdrant_api_key:
+                    print("WARNING: QDRANT_URL or QDRANT_API_KEY not set in environment.")
+
+                _client = QdrantClient(
+                    url=qdrant_url,
+                    api_key=qdrant_api_key,
+                    timeout=60,
+                )
+                print("Connected to Qdrant.")
     return _client
 
 
 # ==================================================
-# RETRIEVE (LATE MAPPING)
+# RETRIEVE
 # ==================================================
 
 def retrieve(
@@ -92,20 +116,23 @@ def retrieve(
         response = client.query_points(
             collection_name=collection_name,
             query=query_embedding.tolist(),
+            using="",  # Explicitly target the unnamed dense vector
             limit=k,
-            # We ONLY ask for the parent_id and metadata, not the text
-            with_payload=["parent_id", "paper_name", "chunk_id"],
+            with_payload=True,  # Fetch full payload including text for reranking
         )
     except Exception as e:
-        raise RuntimeError(f"Qdrant retrieval failed: {e}")
+        raise RuntimeError(f"Qdrant dense retrieval failed: {e}")
 
     results = []
     for point in response.points:
+        payload = point.payload or {}
         results.append({
             "score": float(point.score),
-            "parent_id": point.payload.get("parent_id"),
-            "paper_name": point.payload.get("paper_name"),
-            "child_chunk_id": point.payload.get("chunk_id")
+            "payload": payload,
+            # Explicitly expose keys to match the fusion pipeline expectations
+            "chunk_id": payload.get("chunk_id"),
+            "parent_id": payload.get("parent_id"),
+            "paper_name": payload.get("paper_name"),
         })
 
     vector_search_ms = round((time.perf_counter() - search_start) * 1000, 2)
@@ -125,7 +152,7 @@ def retrieve(
 # ==================================================
 
 def warmup():
-    print("Running retriever warmup...")
+    print("Running dense retriever warmup...")
     get_qdrant_client()
     get_embedding_model()
     print("Warmup complete.")
@@ -150,5 +177,5 @@ if __name__ == "__main__":
     for rank, result in enumerate(response["results"], start=1):
         print(f"\nRank {rank}")
         print(f"Score: {result['score']:.4f}")
-        print(f"Parent ID: {result['parent_id']}")
+        print(f"Chunk ID: {result['chunk_id']}")
         print(f"Paper: {result['paper_name']}")
