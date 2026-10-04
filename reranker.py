@@ -35,21 +35,17 @@ DEFAULT_BATCH_SIZE = 32
 # DEVICE
 # ==================================================
 
-if torch.cuda.is_available():
+def get_device():
+    if torch.cuda.is_available():
+        return "cuda"
 
-    DEVICE = "cuda"
+    if (
+        hasattr(torch.backends, "mps")
+        and torch.backends.mps.is_available()
+    ):
+        return "mps"
 
-elif (
-    hasattr(torch.backends, "mps")
-    and torch.backends.mps.is_available()
-):
-
-    DEVICE = "mps"
-
-else:
-
-    DEVICE = "cpu"
-
+    return "cpu"
 # ==================================================
 # SINGLETON
 # ==================================================
@@ -64,12 +60,11 @@ def get_reranker():
     if _reranker is None:
 
         print(
-            f"Loading reranker on {DEVICE}"
+            f"Loading reranker on {get_device()}"
         )
-
         _reranker = CrossEncoder(
             MODEL_NAME,
-            device=DEVICE,
+            device=get_device(),
         )
 
         print(
@@ -105,7 +100,7 @@ def rerank(
 
                 "candidate_count": 0,
 
-                "device": DEVICE,
+                "device": get_device(),
 
                 "model": MODEL_NAME,
             },
@@ -115,7 +110,7 @@ def rerank(
         get_reranker()
     )
 
-    print(f"Reranker device: {DEVICE}")
+    print(f"Reranker device: {get_device()}")
     
 
     pairs = []
@@ -193,7 +188,7 @@ def rerank(
             len(candidates),
 
             "device":
-            DEVICE,
+            get_device(),
 
             "model":
             MODEL_NAME,
