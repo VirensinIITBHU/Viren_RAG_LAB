@@ -774,6 +774,11 @@ function renderMetrics(metrics) {
         </div>
 
         <div class="pipeline-step">
+            <span class="step-label">LLM Generation</span>
+            <span class="step-value">${llmMs} ms</span>
+        </div>
+
+        <div class="pipeline-step">
             <span class="step-label" style="color: var(--accent); font-weight: 600;">Total Pipeline Latency</span>
             <span class="step-value" style="font-size: 0.95rem; font-weight: 700;">${totalMs} ms</span>
         </div>
