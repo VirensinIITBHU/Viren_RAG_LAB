@@ -748,10 +748,13 @@ function renderMetrics(metrics) {
     }
 
     // Parse the metrics (adding fallbacks so it doesn't break)
+
+
     const denseMs = metrics.dense_ms || 0;
     const bm25Ms = metrics.bm25_ms || 0;
     const rerankMs = metrics.rerank_ms || 0;
-    const totalMs = metrics.total_ms || (denseMs + bm25Ms + rerankMs);
+    const llmMs = metrics.llm_ms || 0;
+    const totalMs = metrics.total_ms || (denseMs + bm25Ms + rerankMs + llmMs);
 
     // Build the interactive pipeline visualization
     metricsPanel.innerHTML = `
